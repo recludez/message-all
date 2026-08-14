@@ -10,20 +10,24 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // --- Connect to MongoDB Atlas ---
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://gamebuildinginc_db_user:coolpasswordagain123@cluster0.5bglhz8.mongodb.net/Message-All?appName=Cluster0";
+const MONGO_URI = process.env.MONGO_URI;
 
-mongoose.connect(MONGO_URI)
-  .then(() => console.log('Connected to MongoDB Atlas!'))
-  .catch(err => console.error('MongoDB Startup Connection Error:', err));
+if (!MONGO_URI) {
+  console.error('CRITICAL: MONGO_URI environment variable is missing!');
+} else {
+  mongoose.connect(MONGO_URI)
+    .then(() => console.log('Connected to MongoDB Atlas!'))
+    .catch(err => console.error('MongoDB Startup Connection Error:', err));
+}
 
-// --- User Schema & Model (UPDATED WITH PROFILE FIELDS) ---
+// --- User Schema ---
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
   friends: [{ type: String }],
   bio: { type: String, default: "Hey there! I am using ChatApp." },
-  avatar: { type: String, default: "https://i.imgur.com/6VBx3io.png" }, // Default avatar
-  status: { type: String, default: "Online" } // "Online", "Busy", "AFK", etc.
+  avatar: { type: String, default: "https://i.imgur.com/6VBx3io.png" },
+  status: { type: String, default: "Online" }
 });
 
 const User = mongoose.model('User', userSchema);
@@ -49,14 +53,15 @@ app.post('/api/signup', async (req, res) => {
 
     res.json({ success: true, username });
   } catch (err) {
-    console.error('SIGNUP ERROR LOG:', err);
+    console.error('SIGNUP ERROR:', err);
     res.status(500).json({ error: 'Server error during signup' });
   }
 });
 
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
-  
+  if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
+
   try {
     const user = await User.findOne({ username });
     if (!user) return res.status(400).json({ error: 'User not found' });
@@ -66,14 +71,12 @@ app.post('/api/login', async (req, res) => {
 
     res.json({ success: true, username });
   } catch (err) {
-    console.error('LOGIN ERROR LOG:', err);
+    console.error('LOGIN ERROR:', err);
     res.status(500).json({ error: 'Server error during login' });
   }
 });
 
-// --- PROFILE APIS ---
-
-// Get a user's profile info
+// --- Profile APIs ---
 app.get('/api/profile/:username', async (req, res) => {
   try {
     const user = await User.findOne({ username: req.params.username }, 'username bio avatar status');
@@ -85,19 +88,20 @@ app.get('/api/profile/:username', async (req, res) => {
   }
 });
 
-// Update current user's profile info
 app.post('/api/profile/update', async (req, res) => {
   const { username, bio, avatar, status } = req.body;
+  if (!username) return res.status(400).json({ error: 'Username required' });
+
   try {
     const updatedUser = await User.findOneAndUpdate(
       { username },
       { bio, avatar, status },
-      { new: true, fields: 'username bio avatar status' }
+      { new: true, select: 'username bio avatar status' }
     );
-    
-    // Broadcast live profile update to all connected users
-    io.emit('profile_updated', updatedUser);
 
+    if (!updatedUser) return res.status(404).json({ error: 'User not found' });
+
+    io.emit('profile_updated', updatedUser);
     res.json({ success: true, user: updatedUser });
   } catch (err) {
     console.error('PROFILE UPDATE ERROR:', err);
@@ -156,12 +160,12 @@ io.on('connection', (socket) => {
         }
       }
     } catch (err) {
-      console.error('FRIEND ADD ERROR LOG:', err);
+      console.error('FRIEND ADD ERROR:', err);
       socket.emit('friend_error', 'Database error adding friend');
     }
   });
 
-  socket.on('send_message', ({ target, text, isDM }) => {
+  socket.on('send_message', ({ target, text, isDM, avatar }) => {
     if (!currentUser || !text.trim()) return;
 
     const msgData = {
@@ -169,13 +173,14 @@ io.on('connection', (socket) => {
       text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       target,
-      isDM
+      isDM,
+      avatar: avatar || 'https://i.imgur.com/6VBx3io.png'
     };
 
     if (isDM) {
       const targetSocketId = Object.keys(activeUsers).find(id => activeUsers[id] === target);
       const dmRoomId = [currentUser, target].sort().join('_');
-      
+
       if (!messages[dmRoomId]) messages[dmRoomId] = [];
       messages[dmRoomId].push(msgData);
 
@@ -186,7 +191,7 @@ io.on('connection', (socket) => {
     } else {
       if (!messages['global']) messages['global'] = [];
       messages['global'].push(msgData);
-      
+
       io.to('global').emit('receive_message', msgData);
     }
   });
