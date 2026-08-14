@@ -10,17 +10,20 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // --- Connect to MongoDB Atlas ---
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://gamebuildinginc_db_user:coolpasswordagain123@cluster0.5bglhz8.mongodb.net/Message-All?appName=Cluster0";
+const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://gamebuildinginc_db_user:YOUR_NEW_PASSWORD@cluster0.5bglhz8.mongodb.net/Message-All?appName=Cluster0";
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Connected to MongoDB Atlas!'))
   .catch(err => console.error('MongoDB Startup Connection Error:', err));
 
-// --- User Schema & Model ---
+// --- User Schema & Model (UPDATED WITH PROFILE FIELDS) ---
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
-  friends: [{ type: String }]
+  friends: [{ type: String }],
+  bio: { type: String, default: "Hey there! I am using ChatApp." },
+  avatar: { type: String, default: "https://i.imgur.com/6VBx3io.png" }, // Default avatar
+  status: { type: String, default: "Online" } // "Online", "Busy", "AFK", etc.
 });
 
 const User = mongoose.model('User', userSchema);
@@ -65,6 +68,40 @@ app.post('/api/login', async (req, res) => {
   } catch (err) {
     console.error('LOGIN ERROR LOG:', err);
     res.status(500).json({ error: 'Server error during login' });
+  }
+});
+
+// --- PROFILE APIS ---
+
+// Get a user's profile info
+app.get('/api/profile/:username', async (req, res) => {
+  try {
+    const user = await User.findOne({ username: req.params.username }, 'username bio avatar status');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// Update current user's profile info
+app.post('/api/profile/update', async (req, res) => {
+  const { username, bio, avatar, status } = req.body;
+  try {
+    const updatedUser = await User.findOneAndUpdate(
+      { username },
+      { bio, avatar, status },
+      { new: true, fields: 'username bio avatar status' }
+    );
+    
+    // Broadcast live profile update to all connected users
+    io.emit('profile_updated', updatedUser);
+
+    res.json({ success: true, user: updatedUser });
+  } catch (err) {
+    console.error('PROFILE UPDATE ERROR:', err);
+    res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 
@@ -120,74 +157,4 @@ io.on('connection', (socket) => {
       }
     } catch (err) {
       console.error('FRIEND ADD ERROR LOG:', err);
-      socket.emit('friend_error', 'Database error adding friend');
-    }
-  });
-
-  // --- FIXED MESSAGE ROUTING ---
-  socket.on('send_message', ({ target, text, isDM }) => {
-    if (!currentUser || !text.trim()) return;
-
-    const msgData = {
-      sender: currentUser,
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      target,
-      isDM
-    };
-
-    if (isDM) {
-      const targetSocketId = Object.keys(activeUsers).find(id => activeUsers[id] === target);
-      const dmRoomId = [currentUser, target].sort().join('_');
-      
-      if (!messages[dmRoomId]) messages[dmRoomId] = [];
-      messages[dmRoomId].push(msgData);
-
-      // Send to recipient if online
-      if (targetSocketId) {
-        io.to(targetSocketId).emit('receive_message', msgData);
-      }
-      // Send to sender
-      socket.emit('receive_message', msgData);
-    } else {
-      // Global message handling
-      if (!messages['global']) messages['global'] = [];
-      messages['global'].push(msgData);
-      
-      // Broadcast strictly to global room listeners
-      io.to('global').emit('receive_message', msgData);
-    }
-  });
-
-  socket.on('get_dm_history', (targetUser) => {
-    const dmRoomId = [currentUser, targetUser].sort().join('_');
-    socket.emit('chat_history', {
-      room: targetUser,
-      messages: messages[dmRoomId] || []
-    });
-  });
-
-  socket.on('disconnect', () => {
-    delete activeUsers[socket.id];
-    broadcastOnlineUsers();
-  });
-
-  function broadcastOnlineUsers() {
-    const onlineList = Array.from(new Set(Object.values(activeUsers)));
-    io.emit('update_online_users', onlineList);
-  }
-
-  async function sendFriendList(userSocket, username) {
-    try {
-      const user = await User.findOne({ username });
-      if (user) {
-        userSocket.emit('update_friends', user.friends || []);
-      }
-    } catch (err) {
-      console.error('Error fetching friends:', err);
-    }
-  }
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+      socket.emit('friend
