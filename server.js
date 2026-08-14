@@ -11,7 +11,7 @@ const io = new Server(server);
 
 // --- Connect to MongoDB Atlas ---
 // Replace YOUR_NEW_PASSWORD with the password you set in MongoDB Atlas (Database Access)
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://gamebuildinginc_db_user:YOUR_NEW_PASSWORD@cluster0.5bglhz8.mongodb.net/Message-All?appName=Cluster0";
+const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://gamebuildinginc_db_user:coolpasswordagain123@cluster0.5bglhz8.mongodb.net/Message-All?appName=Cluster0";
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Connected to MongoDB Atlas!'))
