@@ -20,7 +20,6 @@
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     body { background-color: var(--bg-dark); color: var(--text-main); height: 100vh; display: flex; align-items: center; justify-content: center; }
 
-    /* Auth Box */
     #auth-container { background: var(--bg-card); padding: 30px; border-radius: 12px; width: 320px; border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
     #auth-container h2 { margin-bottom: 20px; text-align: center; }
     input { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid var(--border); background: #2a2a2a; color: #fff; outline: none; }
@@ -28,10 +27,8 @@
     button:hover { background: var(--accent-hover); }
     .toggle-auth { text-align: center; margin-top: 15px; font-size: 0.85em; color: var(--text-muted); cursor: pointer; }
 
-    /* Chat App Layout */
     #app-container { display: flex; width: 90vw; height: 85vh; background: var(--bg-card); border-radius: 12px; border: 1px solid var(--border); overflow: hidden; }
     
-    /* Sidebar */
     .sidebar { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
     .sidebar-header { padding: 15px; border-bottom: 1px solid var(--border); font-size: 1.1em; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
     .section-title { padding: 10px 15px 5px; font-size: 0.75em; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px; }
@@ -40,7 +37,10 @@
     .item-list li:hover, .item-list li.active { background: #2a2a2a; }
     .status-indicator { width: 8px; height: 8px; border-radius: 50%; background: var(--online); }
 
-    /* Main Chat Window */
+    .friend-box { padding: 10px 15px; border-bottom: 1px solid var(--border); display: flex; gap: 5px; }
+    .friend-box input { margin: 0; padding: 6px; font-size: 0.85em; }
+    .friend-box button { margin: 0; padding: 6px 12px; width: auto; font-size: 0.85em; }
+
     .chat-area { flex-grow: 1; display: flex; flex-direction: column; background: var(--bg-dark); }
     .chat-header { padding: 15px; border-bottom: 1px solid var(--border); background: var(--bg-sidebar); font-weight: bold; }
     .messages-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
@@ -50,7 +50,6 @@
     .message.outgoing { background: var(--accent); color: #000; align-self: flex-end; border-bottom-right-radius: 2px; }
     .msg-meta { font-size: 0.7em; margin-bottom: 4px; opacity: 0.8; }
 
-    /* Message Bar */
     .input-box { padding: 15px; border-top: 1px solid var(--border); background: var(--bg-sidebar); display: flex; gap: 10px; }
     .input-box input { margin: 0; }
     .input-box button { width: auto; padding: 0 20px; }
@@ -74,10 +73,18 @@
         <span id="user-display">User</span>
       </div>
       
+      <div class="friend-box">
+        <input type="text" id="friend-input" placeholder="Add friend username..." />
+        <button onclick="addFriend()">+</button>
+      </div>
+
       <div class="section-title">Channels</div>
       <ul class="item-list">
         <li class="active" onclick="switchTarget('global', false)"># global</li>
       </ul>
+
+      <div class="section-title">Friends</div>
+      <ul class="item-list" id="friends-list"></ul>
 
       <div class="section-title">Online Users</div>
       <ul class="item-list" id="users-list"></ul>
@@ -156,6 +163,29 @@
         });
       });
 
+      socket.on('update_friends', (friends) => {
+        const list = document.getElementById('friends-list');
+        list.innerHTML = '';
+        if (friends.length === 0) {
+          list.innerHTML = `<li style="color: var(--text-muted); font-size: 0.85em;">No friends added yet</li>`;
+          return;
+        }
+        friends.forEach(friend => {
+          const li = document.createElement('li');
+          li.innerHTML = `<span>👤 ${friend}</span>`;
+          li.onclick = () => switchTarget(friend, true);
+          list.appendChild(li);
+        });
+      });
+
+      socket.on('friend_added', (friend) => {
+        alert(`You are now friends with ${friend}!`);
+      });
+
+      socket.on('friend_error', (msg) => {
+        alert(msg);
+      });
+
       socket.on('chat_history', ({ room, messages }) => {
         const box = document.getElementById('messages');
         box.innerHTML = '';
@@ -165,6 +195,14 @@
       socket.on('receive_message', (msg) => {
         appendMessage(msg);
       });
+    }
+
+    function addFriend() {
+      const input = document.getElementById('friend-input');
+      const target = input.value.trim();
+      if (!target) return;
+      socket.emit('add_friend', target);
+      input.value = '';
     }
 
     function switchTarget(target, dmFlag) {
