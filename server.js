@@ -1,97 +1,249 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const bcrypt = require('bcryptjs');
-const path = require('path');
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
-
-// Extended user objects to store friend lists
-const users = {};        // { username: { passwordHash, friends: [] } }
-const activeUsers = {};  // { socketId: username }
-const messages = { global: [] };
-
-// --- Authentication APIs ---
-app.post('/api/signup', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
-  if (users[username]) return res.status(400).json({ error: 'User already exists' });
-
-  const passwordHash = await bcrypt.hash(password, 10);
-  users[username] = { passwordHash, friends: [] };
-  res.json({ success: true, username });
-});
-
-app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
-  const user = users[username];
-  if (!user) return res.status(400).json({ error: 'User not found' });
-
-  const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) return res.status(400).json({ error: 'Invalid password' });
-
-  if (!user.friends) user.friends = [];
-
-  res.json({ success: true, username });
-});
-
-// --- Real-time WebSockets ---
-io.on('connection', (socket) => {
-  let currentUser = null;
-
-  socket.on('user_connected', (username) => {
-    currentUser = username;
-    activeUsers[socket.id] = username;
-    socket.join('global');
-
-    if (users[currentUser] && !users[currentUser].friends) {
-      users[currentUser].friends = [];
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Message All - Dark Mode Chat</title>
+  <style>
+    :root {
+      --bg-dark: #121212;
+      --bg-card: #1e1e1e;
+      --bg-sidebar: #181818;
+      --accent: #bb86fc;
+      --accent-hover: #9965f4;
+      --text-main: #e0e0e0;
+      --text-muted: #a0a0a0;
+      --border: #2d2d2d;
+      --online: #00e676;
     }
 
-    broadcastOnlineUsers();
-    sendFriendList(socket);
-    socket.emit('chat_history', { room: 'global', messages: messages['global'] || [] });
-  });
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { background-color: var(--bg-dark); color: var(--text-main); height: 100vh; display: flex; align-items: center; justify-content: center; }
 
-  // Handle adding friends
-  socket.on('add_friend', (targetUsername) => {
-    if (!currentUser) return;
-    if (targetUsername === currentUser) {
-      return socket.emit('friend_error', 'You cannot friend yourself!');
+    #auth-container { background: var(--bg-card); padding: 30px; border-radius: 12px; width: 320px; border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+    #auth-container h2 { margin-bottom: 20px; text-align: center; }
+    input { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid var(--border); background: #2a2a2a; color: #fff; outline: none; }
+    button { width: 100%; padding: 10px; margin-top: 10px; border-radius: 6px; border: none; background: var(--accent); color: #000; font-weight: bold; cursor: pointer; transition: 0.2s; }
+    button:hover { background: var(--accent-hover); }
+    .toggle-auth { text-align: center; margin-top: 15px; font-size: 0.85em; color: var(--text-muted); cursor: pointer; }
+
+    #app-container { display: flex; width: 90vw; height: 85vh; background: var(--bg-card); border-radius: 12px; border: 1px solid var(--border); overflow: hidden; }
+    
+    .sidebar { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+    .sidebar-header { padding: 15px; border-bottom: 1px solid var(--border); font-size: 1.1em; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+    .section-title { padding: 10px 15px 5px; font-size: 0.75em; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px; }
+    .item-list { list-style: none; overflow-y: auto; flex-grow: 1; }
+    .item-list li { padding: 10px 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; border-radius: 4px; margin: 2px 8px; }
+    .item-list li:hover, .item-list li.active { background: #2a2a2a; }
+    .status-indicator { width: 8px; height: 8px; border-radius: 50%; background: var(--online); }
+
+    .friend-box { padding: 10px 15px; border-bottom: 1px solid var(--border); display: flex; gap: 5px; }
+    .friend-box input { margin: 0; padding: 6px; font-size: 0.85em; }
+    .friend-box button { margin: 0; padding: 6px 12px; width: auto; font-size: 0.85em; }
+
+    .chat-area { flex-grow: 1; display: flex; flex-direction: column; background: var(--bg-dark); }
+    .chat-header { padding: 15px; border-bottom: 1px solid var(--border); background: var(--bg-sidebar); font-weight: bold; }
+    .messages-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+    
+    .message { max-width: 65%; padding: 10px 14px; border-radius: 10px; font-size: 0.9em; line-height: 1.4; word-wrap: break-word; }
+    .message.incoming { background: #2a2a2a; align-self: flex-start; border-bottom-left-radius: 2px; }
+    .message.outgoing { background: var(--accent); color: #000; align-self: flex-end; border-bottom-right-radius: 2px; }
+    .msg-meta { font-size: 0.7em; margin-bottom: 4px; opacity: 0.8; }
+
+    .input-box { padding: 15px; border-top: 1px solid var(--border); background: var(--bg-sidebar); display: flex; gap: 10px; }
+    .input-box input { margin: 0; }
+    .input-box button { width: auto; padding: 0 20px; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <div id="auth-container">
+    <h2 id="auth-title">Login</h2>
+    <input type="text" id="username" placeholder="Username" />
+    <input type="password" id="password" placeholder="Password" />
+    <button id="auth-btn" onclick="handleAuth()">Login</button>
+    <div class="toggle-auth" onclick="toggleAuthMode()">Need an account? Sign Up</div>
+  </div>
+
+  <div id="app-container" class="hidden">
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <span id="user-display">User</span>
+      </div>
+      
+      <div class="friend-box">
+        <input type="text" id="friend-input" placeholder="Add friend username..." />
+        <button onclick="addFriend()">+</button>
+      </div>
+
+      <div class="section-title">Channels</div>
+      <ul class="item-list">
+        <li class="active" onclick="switchTarget('global', false)"># global</li>
+      </ul>
+
+      <div class="section-title">Friends</div>
+      <ul class="item-list" id="friends-list"></ul>
+
+      <div class="section-title">Online Users</div>
+      <ul class="item-list" id="users-list"></ul>
+    </div>
+
+    <div class="chat-area">
+      <div class="chat-header" id="chat-title"># global</div>
+      <div class="messages-box" id="messages"></div>
+      
+      <div class="input-box">
+        <input type="text" id="message-input" placeholder="Type a message..." onkeydown="if(event.key==='Enter') sendMessage()" />
+        <button onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    let socket;
+    let currentUser = null;
+    let currentTarget = 'global';
+    let isDM = false;
+    let isLogin = true;
+
+    function toggleAuthMode() {
+      isLogin = !isLogin;
+      document.getElementById('auth-title').innerText = isLogin ? 'Login' : 'Sign Up';
+      document.getElementById('auth-btn').innerText = isLogin ? 'Login' : 'Sign Up';
+      document.querySelector('.toggle-auth').innerText = isLogin ? 'Need an account? Sign Up' : 'Have an account? Login';
     }
-    if (!users[targetUsername]) {
-      return socket.emit('friend_error', 'User does not exist!');
+
+    async function handleAuth() {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value.trim();
+
+      if (!username || !password) return alert('Fill in all fields');
+
+      const endpoint = isLogin ? '/api/login' : '/api/signup';
+      
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const data = await res.json();
+        if (!res.ok) return alert(data.error);
+
+        currentUser = data.username;
+        document.getElementById('auth-container').classList.add('hidden');
+        document.getElementById('app-container').classList.remove('hidden');
+        document.getElementById('user-display').innerText = `@${currentUser}`;
+
+        initSocket();
+      } catch (err) {
+        alert('Server communication error');
+      }
     }
 
-    const myFriends = users[currentUser].friends;
-    if (myFriends.includes(targetUsername)) {
-      return socket.emit('friend_error', 'User is already your friend!');
+    function initSocket() {
+      socket = io();
+
+      socket.emit('user_connected', currentUser);
+
+      socket.on('update_online_users', (users) => {
+        const list = document.getElementById('users-list');
+        list.innerHTML = '';
+        users.forEach(user => {
+          if (user === currentUser) return;
+          const li = document.createElement('li');
+          li.innerHTML = `<span>${user}</span> <div class="status-indicator"></div>`;
+          li.onclick = () => switchTarget(user, true);
+          list.appendChild(li);
+        });
+      });
+
+      socket.on('update_friends', (friends) => {
+        const list = document.getElementById('friends-list');
+        list.innerHTML = '';
+        if (friends.length === 0) {
+          list.innerHTML = `<li style="color: var(--text-muted); font-size: 0.85em;">No friends added yet</li>`;
+          return;
+        }
+        friends.forEach(friend => {
+          const li = document.createElement('li');
+          li.innerHTML = `<span>👤 ${friend}</span>`;
+          li.onclick = () => switchTarget(friend, true);
+          list.appendChild(li);
+        });
+      });
+
+      socket.on('friend_added', (friend) => {
+        alert(`You are now friends with ${friend}!`);
+      });
+
+      socket.on('friend_error', (msg) => {
+        alert(msg);
+      });
+
+      socket.on('chat_history', ({ room, messages }) => {
+        const box = document.getElementById('messages');
+        box.innerHTML = '';
+        messages.forEach(appendMessage);
+      });
+
+      socket.on('receive_message', (msg) => {
+        appendMessage(msg);
+      });
     }
 
-    // Add target to user's friend list
-    myFriends.push(targetUsername);
-
-    // Reciprocate: Add user to target's friend list
-    if (!users[targetUsername].friends) users[targetUsername].friends = [];
-    if (!users[targetUsername].friends.includes(currentUser)) {
-      users[targetUsername].friends.push(currentUser);
+    function addFriend() {
+      const input = document.getElementById('friend-input');
+      const target = input.value.trim();
+      if (!target) return;
+      socket.emit('add_friend', target);
+      input.value = '';
     }
 
-    socket.emit('friend_added', targetUsername);
-    sendFriendList(socket);
-
-    // Update target user's UI if they are online
-    const targetSocketId = Object.keys(activeUsers).find(id => activeUsers[id] === targetUsername);
-    if (targetSocketId) {
-      const targetSocket = io.sockets.sockets.get(targetSocketId);
-      if (targetSocket) sendFriendList(targetSocket);
+    function switchTarget(target, dmFlag) {
+      currentTarget = target;
+      isDM = dmFlag;
+      document.getElementById('chat-title').innerText = isDM ? `@${target}` : `# ${target}`;
+      
+      if (isDM) {
+        socket.emit('get_dm_history', currentTarget);
+      } else {
+        socket.emit('user_connected', currentUser);
+      }
     }
-  });
 
-  socket.on('send_message', ({ target, text, isDM }) => {
-    if (!currentUser || !text.
+    function sendMessage() {
+      const input = document.getElementById('message-input');
+      const text = input.value.trim();
+      if (!text || !socket) return;
+
+      socket.emit('send_message', {
+        target: currentTarget,
+        text,
+        isDM
+      });
+
+      input.value = '';
+    }
+
+    function appendMessage(msg) {
+      const box = document.getElementById('messages');
+      const isSelf = msg.sender === currentUser;
+
+      const div = document.createElement('div');
+      div.className = `message ${isSelf ? 'outgoing' : 'incoming'}`;
+      div.innerHTML = `
+        <div class="msg-meta">${isSelf ? 'You' : msg.sender} • ${msg.timestamp}</div>
+        <div>${msg.text}</div>
+      `;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+  </script>
+</body>
+</html>
