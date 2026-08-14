@@ -96,3 +96,46 @@
   transition: background 0.2s;
 }
 .save-btn:hover { background: #4f46e5; }
+
+/* Message row layout */
+.message-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 4px 8px;
+}
+
+/* Chat PFP Styling */
+.chat-pfp {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #3b82f6; /* Accent ring */
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* Message Header layout */
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.username {
+  font-weight: bold;
+  color: #6366f1;
+  cursor: pointer;
+}
+
+.username:hover {
+  text-decoration: underline;
+}
+
+.timestamp {
+  font-size: 0.75rem;
+  color: #64748b;
+}
