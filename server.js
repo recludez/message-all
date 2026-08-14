@@ -89,4 +89,105 @@ io.on('connection', (socket) => {
     }
 
     try {
-      const me = await User
+      const me = await User.findOne({ username: currentUser });
+      const target = await User.findOne({ username: targetUsername });
+
+      if (!target) {
+        return socket.emit('friend_error', 'User does not exist!');
+      }
+
+      if (me.friends.includes(targetUsername)) {
+        return socket.emit('friend_error', 'User is already your friend!');
+      }
+
+      me.friends.push(targetUsername);
+      await me.save();
+
+      if (!target.friends.includes(currentUser)) {
+        target.friends.push(currentUser);
+        await target.save();
+      }
+
+      socket.emit('friend_added', targetUsername);
+      await sendFriendList(socket, currentUser);
+
+      const targetSocketId = Object.keys(activeUsers).find(id => activeUsers[id] === targetUsername);
+      if (targetSocketId) {
+        const targetSocket = io.sockets.sockets.get(targetSocketId);
+        if (targetSocket) {
+          await sendFriendList(targetSocket, targetUsername);
+        }
+      }
+    } catch (err) {
+      console.error('FRIEND ADD ERROR LOG:', err);
+      socket.emit('friend_error', 'Database error adding friend');
+    }
+  });
+
+  // --- FIXED MESSAGE ROUTING ---
+  socket.on('send_message', ({ target, text, isDM }) => {
+    if (!currentUser || !text.trim()) return;
+
+    const msgData = {
+      sender: currentUser,
+      text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      target,
+      isDM
+    };
+
+    if (isDM) {
+      const targetSocketId = Object.keys(activeUsers).find(id => activeUsers[id] === target);
+      const dmRoomId = [currentUser, target].sort().join('_');
+      
+      if (!messages[dmRoomId]) messages[dmRoomId] = [];
+      messages[dmRoomId].push(msgData);
+
+      // Send to recipient if online
+      if (targetSocketId) {
+        io.to(targetSocketId).emit('receive_message', msgData);
+      }
+      // Send to sender
+      socket.emit('receive_message', msgData);
+    } else {
+      // Global message handling
+      if (!messages['global']) messages['global'] = [];
+      messages['global'].push(msgData);
+      
+      // Broadcast strictly to global room listeners
+      io.to('global').emit('receive_message', msgData);
+    }
+  });
+
+  socket.on('get_dm_history', (targetUser) => {
+    const dmRoomId = [currentUser, targetUser].sort().join('_');
+    socket.emit('chat_history', {
+      room: targetUser,
+      messages: messages[dmRoomId] || []
+    });
+  });
+
+  socket.on('disconnect', () => {
+    delete activeUsers[socket.id];
+    broadcastOnlineUsers();
+  });
+
+  function broadcastOnlineUsers() {
+    const onlineList = Array.from(new Set(Object.values(activeUsers)));
+    io.emit('update_online_users', onlineList);
+  }
+
+  async function sendFriendList(userSocket, username) {
+    try {
+      const user = await User.findOne({ username });
+      if (user) {
+        userSocket.emit('update_friends', user.friends || []);
+      }
+    } catch (err) {
+      console.error('Error fetching friends:', err);
+    }
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
