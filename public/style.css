@@ -1,0 +1,98 @@
+/* Modal Background Overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(10, 11, 16, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-overlay.hidden { display: none; }
+.hidden { display: none !important; }
+
+/* Sleek Dark Profile Card */
+.profile-card {
+  background: #12141d;
+  width: 340px;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  position: relative;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  border: 1px solid #232738;
+  color: #f1f5f9;
+}
+
+.close-btn {
+  position: absolute;
+  top: 14px; right: 18px;
+  background: none; border: none;
+  font-size: 22px; cursor: pointer; color: #64748b;
+  transition: color 0.2s;
+}
+.close-btn:hover { color: #f87171; }
+
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+#profile-card-avatar {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  border: 2px solid #6366f1; /* Accent Purple/Indigo */
+  object-fit: cover;
+}
+
+.profile-title h2 { margin: 0; font-size: 1.4rem; color: #ffffff; }
+
+.status-badge {
+  display: inline-block;
+  background: #10b981; color: #022c22;
+  font-size: 0.75rem; font-weight: 700;
+  padding: 3px 10px; border-radius: 20px;
+  margin-top: 6px;
+}
+
+.profile-body h3 { 
+  font-size: 0.8rem; 
+  text-transform: uppercase; 
+  letter-spacing: 0.05em; 
+  color: #64748b; 
+  margin-bottom: 8px; 
+}
+
+.profile-body p { 
+  font-size: 0.95rem; 
+  color: #cbd5e1; 
+  background: #1a1d2b; 
+  padding: 12px; 
+  border-radius: 10px; 
+  border: 1px solid #282c40;
+}
+
+/* Edit Inputs - Dark Theme */
+#edit-profile-section input, #edit-profile-section textarea {
+  width: 100%; margin-bottom: 10px;
+  padding: 10px; border: 1px solid #2d3248;
+  border-radius: 8px; background: #0b0c10;
+  color: #ffffff; box-sizing: border-box;
+  font-family: inherit;
+}
+
+#edit-profile-section input:focus, #edit-profile-section textarea:focus {
+  outline: none; border-color: #6366f1;
+}
+
+.save-btn {
+  width: 100%; background: #6366f1; color: white;
+  border: none; padding: 12px; border-radius: 8px;
+  font-weight: 600; cursor: pointer;
+  transition: background 0.2s;
+}
+.save-btn:hover { background: #4f46e5; }
