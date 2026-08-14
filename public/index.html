@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Message All - Dark Mode Chat</title>
+  
+  <!-- Link to external CSS -->
+  <link rel="stylesheet" href="style.css">
+
   <style>
     :root {
       --bg-dark: #121212;
@@ -31,6 +35,9 @@
     
     .sidebar { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
     .sidebar-header { padding: 15px; border-bottom: 1px solid var(--border); font-size: 1.1em; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+    .user-profile-btn { cursor: pointer; transition: color 0.2s; }
+    .user-profile-btn:hover { color: var(--accent); }
+
     .section-title { padding: 10px 15px 5px; font-size: 0.75em; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px; }
     .item-list { list-style: none; overflow-y: auto; flex-grow: 1; }
     .item-list li { padding: 10px 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; border-radius: 4px; margin: 2px 8px; }
@@ -44,11 +51,6 @@
     .chat-area { flex-grow: 1; display: flex; flex-direction: column; background: var(--bg-dark); }
     .chat-header { padding: 15px; border-bottom: 1px solid var(--border); background: var(--bg-sidebar); font-weight: bold; }
     .messages-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
-    
-    .message { max-width: 65%; padding: 10px 14px; border-radius: 10px; font-size: 0.9em; line-height: 1.4; word-wrap: break-word; }
-    .message.incoming { background: #2a2a2a; align-self: flex-start; border-bottom-left-radius: 2px; }
-    .message.outgoing { background: var(--accent); color: #000; align-self: flex-end; border-bottom-right-radius: 2px; }
-    .msg-meta { font-size: 0.7em; margin-bottom: 4px; opacity: 0.8; }
 
     .input-box { padding: 15px; border-top: 1px solid var(--border); background: var(--bg-sidebar); display: flex; gap: 10px; }
     .input-box input { margin: 0; }
@@ -59,6 +61,7 @@
 </head>
 <body>
 
+  <!-- AUTHENTICATION FORM -->
   <div id="auth-container">
     <h2 id="auth-title">Login</h2>
     <input type="text" id="username" placeholder="Username" />
@@ -67,10 +70,11 @@
     <div class="toggle-auth" onclick="toggleAuthMode()">Need an account? Sign Up</div>
   </div>
 
+  <!-- MAIN CHAT APP -->
   <div id="app-container" class="hidden">
     <div class="sidebar">
       <div class="sidebar-header">
-        <span id="user-display">User</span>
+        <span id="user-display" class="user-profile-btn" title="Click to view/edit profile">User</span>
       </div>
       
       <div class="friend-box">
@@ -101,15 +105,46 @@
     </div>
   </div>
 
+  <!-- PROFILE MODAL POPUP -->
+  <div id="profile-modal" class="modal-overlay hidden">
+    <div class="profile-card">
+      <button class="close-btn" onclick="closeProfileModal()">&times;</button>
+      
+      <div class="profile-header">
+        <img id="profile-card-avatar" src="https://i.imgur.com/6VBx3io.png" alt="Avatar">
+        <div class="profile-title">
+          <h2 id="profile-card-username">Username</h2>
+          <span id="profile-card-status" class="status-badge">Online</span>
+        </div>
+      </div>
+
+      <div class="profile-body">
+        <h3>About Me</h3>
+        <p id="profile-card-bio">Loading bio...</p>
+        
+        <div id="edit-profile-section" class="hidden">
+          <hr style="border-color: #232738; margin: 15px 0;">
+          <h3>Edit Profile</h3>
+          <input type="text" id="edit-avatar-input" placeholder="Avatar Image URL">
+          <input type="text" id="edit-status-input" placeholder="Status (e.g. Gaming, Chilling)">
+          <textarea id="edit-bio-input" placeholder="Tell everyone about yourself..." maxlength="150" rows="3"></textarea>
+          <button onclick="saveProfileChanges()" class="save-btn">Save Profile</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="/socket.io/socket.io.js"></script>
 
   <script>
     let socket;
     let currentUser = null;
+    let currentUserAvatar = 'https://i.imgur.com/6VBx3io.png';
     let currentTarget = 'global';
     let isDM = false;
     let isLogin = true;
 
+    // --- AUTHENTICATION ---
     function toggleAuthMode() {
       isLogin = !isLogin;
       document.getElementById('auth-title').innerText = isLogin ? 'Login' : 'Sign Up';
@@ -136,9 +171,16 @@
         if (!res.ok) return alert(data.error);
 
         currentUser = data.username;
+        
+        // Fetch user profile info on login
+        await loadMyProfile();
+
         document.getElementById('auth-container').classList.add('hidden');
         document.getElementById('app-container').classList.remove('hidden');
-        document.getElementById('user-display').innerText = `@${currentUser}`;
+        
+        const userDisplay = document.getElementById('user-display');
+        userDisplay.innerText = `@${currentUser}`;
+        userDisplay.onclick = () => openProfileModal(currentUser);
 
         initSocket();
       } catch (err) {
@@ -146,6 +188,17 @@
       }
     }
 
+    async function loadMyProfile() {
+      try {
+        const res = await fetch(`/api/profile/${currentUser}`);
+        const data = await res.json();
+        if (data.avatar) currentUserAvatar = data.avatar;
+      } catch (err) {
+        console.error('Error fetching own profile:', err);
+      }
+    }
+
+    // --- SOCKET IO ---
     function initSocket() {
       socket = io();
 
@@ -157,8 +210,10 @@
         users.forEach(user => {
           if (user === currentUser) return;
           const li = document.createElement('li');
-          li.innerHTML = `<span>${user}</span> <div class="status-indicator"></div>`;
-          li.onclick = () => switchTarget(user, true);
+          li.innerHTML = `<span onclick="openProfileModal('${escapeHTML(user)}')">${escapeHTML(user)}</span> <div class="status-indicator"></div>`;
+          li.onclick = (e) => {
+            if (e.target.tagName !== 'SPAN') switchTarget(user, true);
+          };
           list.appendChild(li);
         });
       });
@@ -172,7 +227,7 @@
         }
         friends.forEach(friend => {
           const li = document.createElement('li');
-          li.innerHTML = `<span>👤 ${friend}</span>`;
+          li.innerHTML = `<span>👤 ${escapeHTML(friend)}</span>`;
           li.onclick = () => switchTarget(friend, true);
           list.appendChild(li);
         });
@@ -182,9 +237,7 @@
         alert(`You are now friends with ${friend}!`);
       });
 
-      socket.on('friend_error', (msg) => {
-        alert(msg);
-      });
+      socket.on('friend_error', (msg) => alert(msg));
 
       socket.on('chat_history', ({ room, messages }) => {
         const box = document.getElementById('messages');
@@ -197,6 +250,7 @@
       });
     }
 
+    // --- MESSAGING ---
     function addFriend() {
       const input = document.getElementById('friend-input');
       const target = input.value.trim();
@@ -225,7 +279,8 @@
       socket.emit('send_message', {
         target: currentTarget,
         text,
-        isDM
+        isDM,
+        avatar: currentUserAvatar
       });
 
       input.value = '';
@@ -233,52 +288,96 @@
 
     function appendMessage(msg) {
       const box = document.getElementById('messages');
-      const isSelf = msg.sender === currentUser;
+      
+      // Determine if message belongs in current chat view
+      if (isDM) {
+        if (msg.target !== currentTarget && msg.sender !== currentTarget) return;
+      } else {
+        if (msg.isDM) return;
+      }
 
-      const div = document.createElement('div');
-      div.className = `message ${isSelf ? 'outgoing' : 'incoming'}`;
-      div.innerHTML = `
-        <div class="msg-meta">${isSelf ? 'You' : msg.sender} • ${msg.timestamp}</div>
-        <div>${msg.text}</div>
+      const msgElement = document.createElement('div');
+      msgElement.classList.add('message-row');
+
+      const avatarUrl = msg.avatar || 'https://i.imgur.com/6VBx3io.png';
+
+      msgElement.innerHTML = `
+        <img src="${avatarUrl}" class="chat-pfp" alt="PFP" onclick="openProfileModal('${escapeHTML(msg.sender)}')">
+        <div class="message-content">
+          <div class="message-header">
+            <span class="username" onclick="openProfileModal('${escapeHTML(msg.sender)}')">${escapeHTML(msg.sender)}</span>
+            <span class="timestamp">${escapeHTML(msg.timestamp || '')}</span>
+          </div>
+          <p class="message-text">${escapeHTML(msg.text)}</p>
+        </div>
       `;
-      box.appendChild(div);
+
+      box.appendChild(msgElement);
       box.scrollTop = box.scrollHeight;
     }
+
+    // --- PROFILE MODAL FUNCTIONS ---
+    async function openProfileModal(targetUsername) {
+      const modal = document.getElementById('profile-modal');
+      modal.classList.remove('hidden');
+
+      try {
+        const res = await fetch(`/api/profile/${targetUsername}`);
+        const data = await res.json();
+
+        document.getElementById('profile-card-username').innerText = data.username || targetUsername;
+        document.getElementById('profile-card-bio').innerText = data.bio || 'No bio set yet!';
+        document.getElementById('profile-card-status').innerText = data.status || 'Online';
+        document.getElementById('profile-card-avatar').src = data.avatar || 'https://i.imgur.com/6VBx3io.png';
+
+        const editSection = document.getElementById('edit-profile-section');
+        if (targetUsername === currentUser) {
+          editSection.classList.remove('hidden');
+          document.getElementById('edit-bio-input').value = data.bio || '';
+          document.getElementById('edit-status-input').value = data.status || '';
+          document.getElementById('edit-avatar-input').value = data.avatar || '';
+        } else {
+          editSection.classList.add('hidden');
+        }
+      } catch (err) {
+        console.error('Error fetching profile:', err);
+      }
+    }
+
+    function closeProfileModal() {
+      document.getElementById('profile-modal').classList.add('hidden');
+    }
+
+    async function saveProfileChanges() {
+      const bio = document.getElementById('edit-bio-input').value;
+      const status = document.getElementById('edit-status-input').value;
+      const avatar = document.getElementById('edit-avatar-input').value;
+
+      try {
+        const res = await fetch('/api/profile/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: currentUser, bio, avatar, status })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          currentUserAvatar = avatar || currentUserAvatar;
+          alert('Profile updated successfully!');
+          openProfileModal(currentUser);
+        }
+      } catch (err) {
+        console.error('Error saving profile:', err);
+      }
+    }
+
+    // --- SECURITY HELPER ---
+    function escapeHTML(str) {
+      if (!str) return '';
+      return str.replace(/[&<>'"]/g, 
+        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+      );
+    }
   </script>
-
-  <div id="profile-modal" class="modal-overlay hidden">
-  <div class="profile-card">
-    <button class="close-btn" onclick="closeProfileModal()">&times;</button>
-    
-    <div class="profile-header">
-      <img id="profile-card-avatar" src="https://i.imgur.com/6VBx3io.png" alt="Avatar">
-      <div class="profile-title">
-        <h2 id="profile-card-username">Username</h2>
-        <span id="profile-card-status" class="status-badge">Online</span>
-      </div>
-    </div>
-
-    <div class="profile-body">
-      <h3>About Me</h3>
-      <p id="profile-card-bio">Loading bio...</p>
-      
-      <div id="edit-profile-section" class="hidden">
-        <hr>
-        <h3>Edit Profile</h3>
-        <input type="text" id="edit-avatar-input" placeholder="Avatar Image URL">
-        <input type="text" id="edit-status-input" placeholder="Status (e.g. Gaming, Chilling)">
-        <textarea id="edit-bio-input" placeholder="Tell everyone about yourself..." maxlength="150"></textarea>
-        <button onclick="saveProfileChanges()" class="save-btn">Save Profile</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-  <head>
-  <meta charset="UTF-8">
-  <title>Chat App</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-  
 </body>
 </html>
