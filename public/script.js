@@ -1,46 +1,65 @@
-// Function to save profile updates (including PFP)
-async function updatePFP(avatarUrl) {
-  const res = await fetch('/api/profile/update', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: currentUser,
-      avatar: avatarUrl // e.g. "https://i.imgur.com/6VBx3io.png"
-    })
-  });
+// --- HELPER: Escape HTML to prevent XSS ---
+function escapeHTML(str) {
+  if (!str) return '';
+  return str.replace(/[&<>'"]/g, 
+    tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+  );
+}
 
-  const data = await res.json();
-  if (data.success) {
-    alert("Profile picture updated!");
+// --- PROFILE: Update PFP ---
+async function updatePFP(avatarUrl) {
+  try {
+    const res = await fetch('/api/profile/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: currentUser,
+        avatar: avatarUrl
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      currentUserAvatar = avatarUrl; // Update local state
+      alert("Profile picture updated!");
+    }
+  } catch (err) {
+    console.error("Error updating profile picture:", err);
   }
 }
 
-// Example sending message with PFP attached
-socket.emit('send_message', {
-  target: activeChat,
-  text: messageText,
-  isDM: isCurrentChatDM,
-  avatar: currentUserAvatar || 'https://i.imgur.com/6VBx3io.png' // Fallback image if none set
-});
+// --- MESSAGING: Send Message Helper ---
+function sendMessage(messageText, targetChat, isDM) {
+  if (!messageText.trim()) return;
 
+  socket.emit('send_message', {
+    target: targetChat,
+    text: messageText,
+    isDM: isDM,
+    avatar: currentUserAvatar || 'https://i.imgur.com/6VBx3io.png'
+  });
+}
+
+// --- UI: Render Message in Chat ---
 function appendMessageToUI(msg) {
   const chatBox = document.getElementById('chat-messages');
+  if (!chatBox) return;
 
-  // Create message container
   const msgElement = document.createElement('div');
   msgElement.classList.add('message-row');
 
-  // Build the message HTML with Avatar
+  // Build HTML safely using escapeHTML
   msgElement.innerHTML = `
-    <img src="${msg.avatar || 'https://i.imgur.com/6VBx3io.png'}" class="chat-pfp" alt="PFP">
+    <img src="${msg.avatar || 'https://i.imgur.com/6VBx3io.png'}" class="chat-pfp" alt="PFP" onclick="openProfileModal('${escapeHTML(msg.sender)}')">
     <div class="message-content">
       <div class="message-header">
-        <span class="username" onclick="openProfileModal('${msg.sender}')">${msg.sender}</span>
-        <span class="timestamp">${msg.timestamp}</span>
+        <span class="username" onclick="openProfileModal('${escapeHTML(msg.sender)}')">${escapeHTML(msg.sender)}</span>
+        <span class="timestamp">${escapeHTML(msg.timestamp)}</span>
       </div>
-      <p class="message-text">${msg.text}</p>
+      <p class="message-text">${escapeHTML(msg.text)}</p>
     </div>
   `;
 
   chatBox.appendChild(msgElement);
+  chatBox.scrollTop = chatBox.scrollHeight; // Keep chat scrolled to bottom
 }
