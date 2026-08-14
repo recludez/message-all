@@ -157,4 +157,69 @@ io.on('connection', (socket) => {
       }
     } catch (err) {
       console.error('FRIEND ADD ERROR LOG:', err);
-      socket.emit('friend
+      socket.emit('friend_error', 'Database error adding friend');
+    }
+  });
+
+  socket.on('send_message', ({ target, text, isDM }) => {
+    if (!currentUser || !text.trim()) return;
+
+    const msgData = {
+      sender: currentUser,
+      text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      target,
+      isDM
+    };
+
+    if (isDM) {
+      const targetSocketId = Object.keys(activeUsers).find(id => activeUsers[id] === target);
+      const dmRoomId = [currentUser, target].sort().join('_');
+      
+      if (!messages[dmRoomId]) messages[dmRoomId] = [];
+      messages[dmRoomId].push(msgData);
+
+      if (targetSocketId) {
+        io.to(targetSocketId).emit('receive_message', msgData);
+      }
+      socket.emit('receive_message', msgData);
+    } else {
+      if (!messages['global']) messages['global'] = [];
+      messages['global'].push(msgData);
+      
+      io.to('global').emit('receive_message', msgData);
+    }
+  });
+
+  socket.on('get_dm_history', (targetUser) => {
+    const dmRoomId = [currentUser, targetUser].sort().join('_');
+    socket.emit('chat_history', {
+      room: targetUser,
+      messages: messages[dmRoomId] || []
+    });
+  });
+
+  socket.on('disconnect', () => {
+    delete activeUsers[socket.id];
+    broadcastOnlineUsers();
+  });
+
+  function broadcastOnlineUsers() {
+    const onlineList = Array.from(new Set(Object.values(activeUsers)));
+    io.emit('update_online_users', onlineList);
+  }
+
+  async function sendFriendList(userSocket, username) {
+    try {
+      const user = await User.findOne({ username });
+      if (user) {
+        userSocket.emit('update_friends', user.friends || []);
+      }
+    } catch (err) {
+      console.error('Error fetching friends:', err);
+    }
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
