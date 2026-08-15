@@ -61,7 +61,6 @@
     .input-box input { margin: 0; }
     .input-box button { width: auto; padding: 0 20px; }
 
-    /* Modal Styling */
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
     .profile-card { background: var(--bg-card); width: 360px; padding: 20px; border-radius: 12px; border: 1px solid var(--border); position: relative; }
     .close-btn { position: absolute; top: 10px; right: 15px; background: none; border: none; color: var(--text-muted); font-size: 1.5em; cursor: pointer; width: auto; padding: 0; }
@@ -98,6 +97,9 @@
         <button onclick="addFriend()">+</button>
       </div>
 
+      <div class="section-title">Servers</div>
+      <ul class="item-list" id="servers-list"></ul>
+
       <div class="section-title">Channels</div>
       <ul class="item-list">
         <li class="active" onclick="switchTarget('global', false)"># global</li>
@@ -112,7 +114,7 @@
 
     <div class="chat-area">
       <div class="chat-header" id="chat-title"># global</div>
-      <div class="messages-box" id="messages"></div>
+      <div class="messages-box" id="chat-messages"></div>
       
       <div class="input-box">
         <input type="text" id="message-input" placeholder="Type a message..." onkeydown="if(event.key==='Enter') sendMessage()" />
@@ -142,6 +144,7 @@
           <hr style="border-color: #232738; margin: 15px 0;">
           <h3>Edit Profile</h3>
           <input type="text" id="edit-avatar-input" placeholder="Avatar Image URL">
+          <input type="text" id="edit-banner-input" placeholder="Banner Image URL">
           <input type="text" id="edit-status-input" placeholder="Status (e.g. Gaming, Chilling)">
           <textarea id="edit-bio-input" placeholder="Tell everyone about yourself..." maxlength="150" rows="3" style="width:100%; background:#2a2a2a; color:#fff; border:1px solid var(--border); padding:8px; border-radius:6px; margin-top:8px;"></textarea>
           <button onclick="saveProfileChanges()">Save Profile</button>
@@ -150,238 +153,7 @@
     </div>
   </div>
 
-  <script>
-    let socket;
-    let currentUser = null;
-    let currentUserAvatar = 'https://i.imgur.com/6VBx3io.png';
-    let currentTarget = 'global';
-    let isDM = false;
-    let isLogin = true;
-
-    function escapeHTML(str) {
-      if (!str) return '';
-      return str.replace(/[&<>'"]/g, tag => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
-      }[tag] || tag));
-    }
-
-    function toggleAuthMode() {
-      isLogin = !isLogin;
-      document.getElementById('auth-title').innerText = isLogin ? 'Login' : 'Sign Up';
-      document.getElementById('auth-btn').innerText = isLogin ? 'Login' : 'Sign Up';
-      document.querySelector('.toggle-auth').innerText = isLogin ? 'Need an account? Sign Up' : 'Have an account? Login';
-    }
-
-    async function handleAuth() {
-      const username = document.getElementById('auth-username').value.trim();
-      const password = document.getElementById('auth-password').value.trim();
-
-      if (!username || !password) return alert('Fill in all fields');
-
-      const endpoint = isLogin ? '/api/login' : '/api/signup';
-      
-      try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password })
-        });
-
-        const data = await res.json();
-        if (!res.ok) return alert(data.error || 'Authentication failed');
-
-        currentUser = data.username || username;
-        await loadMyProfile();
-
-        document.getElementById('auth-container').classList.add('hidden');
-        document.getElementById('app-container').classList.remove('hidden');
-        
-        const userDisplay = document.getElementById('user-display');
-        userDisplay.innerText = `@${currentUser}`;
-        userDisplay.onclick = () => openProfileModal(currentUser);
-
-        initSocket();
-      } catch (err) {
-        alert('Server communication error');
-      }
-    }
-
-    async function loadMyProfile() {
-      try {
-        const res = await fetch(`/api/profile/${currentUser}`);
-        const data = await res.json();
-        if (data.avatar) currentUserAvatar = data.avatar;
-      } catch (err) {
-        console.error('Error fetching own profile:', err);
-      }
-    }
-
-    function initSocket() {
-      socket = io();
-
-      socket.emit('user_connected', currentUser);
-
-      socket.on('update_online_users', (users) => {
-        const list = document.getElementById('users-list');
-        list.innerHTML = '';
-        users.forEach(user => {
-          if (user === currentUser) return;
-          const li = document.createElement('li');
-          li.innerHTML = `<span onclick="openProfileModal('${escapeHTML(user)}')">${escapeHTML(user)}</span> <div class="status-indicator"></div>`;
-          li.onclick = (e) => {
-            if (e.target.tagName !== 'SPAN') switchTarget(user, true);
-          };
-          list.appendChild(li);
-        });
-      });
-
-      socket.on('update_friends', (friends) => {
-        const list = document.getElementById('friends-list');
-        list.innerHTML = '';
-        if (!friends || friends.length === 0) {
-          list.innerHTML = `<li style="color: var(--text-muted); font-size: 0.85em;">No friends added yet</li>`;
-          return;
-        }
-        friends.forEach(friend => {
-          const li = document.createElement('li');
-          li.innerHTML = `<span>👤 ${escapeHTML(friend)}</span>`;
-          li.onclick = () => switchTarget(friend, true);
-          list.appendChild(li);
-        });
-      });
-
-      socket.on('friend_added', (friend) => alert(`You are now friends with ${friend}!`));
-      socket.on('friend_error', (msg) => alert(msg));
-
-      socket.on('chat_history', ({ messages }) => {
-        const box = document.getElementById('messages');
-        box.innerHTML = '';
-        if (messages) messages.forEach(appendMessage);
-      });
-
-      socket.on('receive_message', (msg) => appendMessage(msg));
-    }
-
-    function addFriend() {
-      const input = document.getElementById('friend-input');
-      const target = input.value.trim();
-      if (!target || !socket) return;
-      socket.emit('add_friend', target);
-      input.value = '';
-    }
-
-    function switchTarget(target, dmFlag) {
-      currentTarget = target;
-      isDM = dmFlag;
-      document.getElementById('chat-title').innerText = isDM ? `@${target}` : `# ${target}`;
-      document.getElementById('messages').innerHTML = '';
-
-      if (isDM) {
-        socket.emit('get_dm_history', currentTarget);
-      } else {
-        socket.emit('user_connected', currentUser);
-      }
-    }
-
-    function sendMessage() {
-      const input = document.getElementById('message-input');
-      const text = input.value.trim();
-      if (!text || !socket) return;
-
-      socket.emit('send_message', {
-        target: currentTarget,
-        text,
-        isDM,
-        avatar: currentUserAvatar
-      });
-
-      input.value = '';
-    }
-
-    function appendMessage(msg) {
-      const box = document.getElementById('messages');
-      if (isDM) {
-        if (msg.target !== currentTarget && msg.sender !== currentTarget) return;
-      } else if (msg.isDM) {
-        return;
-      }
-
-      const msgElement = document.createElement('div');
-      msgElement.classList.add('message-row');
-
-      const avatarUrl = msg.avatar || 'https://i.imgur.com/6VBx3io.png';
-
-      msgElement.innerHTML = `
-        <img src="${avatarUrl}" class="chat-pfp" alt="PFP" onclick="openProfileModal('${escapeHTML(msg.sender)}')">
-        <div class="message-content">
-          <div class="message-header">
-            <span class="username" onclick="openProfileModal('${escapeHTML(msg.sender)}')">${escapeHTML(msg.sender)}</span>
-            <span class="timestamp">${escapeHTML(msg.timestamp || '')}</span>
-          </div>
-          <p class="message-text">${escapeHTML(msg.text)}</p>
-        </div>
-      `;
-
-      box.appendChild(msgElement);
-      box.scrollTop = box.scrollHeight;
-    }
-
-    async function openProfileModal(targetUsername) {
-      const modal = document.getElementById('profile-modal');
-      modal.classList.remove('hidden');
-
-      try {
-        const res = await fetch(`/api/profile/${targetUsername}`);
-        const data = await res.json();
-
-        document.getElementById('profile-card-username').innerText = data.username || targetUsername;
-        document.getElementById('profile-card-bio').innerText = data.bio || 'No bio set yet!';
-        document.getElementById('profile-card-status').innerText = data.status || 'Online';
-        document.getElementById('profile-card-avatar').src = data.avatar || 'https://i.imgur.com/6VBx3io.png';
-
-        const editSection = document.getElementById('edit-profile-section');
-        if (targetUsername === currentUser) {
-          editSection.classList.remove('hidden');
-          document.getElementById('edit-bio-input').value = data.bio || '';
-          document.getElementById('edit-status-input').value = data.status || '';
-          document.getElementById('edit-avatar-input').value = data.avatar || '';
-        } else {
-          editSection.classList.add('hidden');
-        }
-      } catch (err) {
-        console.error('Error fetching profile:', err);
-      }
-    }
-
-    function closeProfileModal() {
-      document.getElementById('profile-modal').classList.add('hidden');
-    }
-
-    async function saveProfileChanges() {
-      const bio = document.getElementById('edit-bio-input').value;
-      const status = document.getElementById('edit-status-input').value;
-      const avatar = document.getElementById('edit-avatar-input').value;
-
-      try {
-        const res = await fetch('/api/profile/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: currentUser, bio, avatar, status })
-        });
-
-        const data = await res.json();
-        if (data.success) {
-          currentUserAvatar = avatar || currentUserAvatar;
-          alert('Profile updated successfully!');
-          openProfileModal(currentUser);
-        }
-      } catch (err) {
-        console.error('Error saving profile:', err);
-      }
-    }
-  </script>
-
-<script src="/socket.io/socket.io.js"></script>
+  <!-- External Script Reference -->
   <script src="script.js"></script>
 
 </body>
