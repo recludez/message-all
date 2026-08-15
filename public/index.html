@@ -3,11 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Message All - Dark Mode Chat</title>
-  
-  <!-- Link to external CSS -->
-  <link rel="stylesheet" href="style.css">
-
+  <title>Dark Mode Chat App</title>
+  <script src="/socket.io/socket.io.js"></script>
   <style>
     :root {
       --bg-dark: #121212;
@@ -52,9 +49,28 @@
     .chat-header { padding: 15px; border-bottom: 1px solid var(--border); background: var(--bg-sidebar); font-weight: bold; }
     .messages-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 
+    .message-row { display: flex; gap: 10px; align-items: flex-start; }
+    .chat-pfp { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; cursor: pointer; }
+    .message-content { display: flex; flex-direction: column; }
+    .message-header { display: flex; gap: 8px; align-items: center; }
+    .username { font-weight: bold; font-size: 0.9em; cursor: pointer; color: var(--accent); }
+    .timestamp { font-size: 0.75em; color: var(--text-muted); }
+    .message-text { font-size: 0.95em; margin-top: 2px; }
+
     .input-box { padding: 15px; border-top: 1px solid var(--border); background: var(--bg-sidebar); display: flex; gap: 10px; }
     .input-box input { margin: 0; }
     .input-box button { width: auto; padding: 0 20px; }
+
+    /* Modal Styling */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .profile-card { background: var(--bg-card); width: 360px; padding: 20px; border-radius: 12px; border: 1px solid var(--border); position: relative; }
+    .close-btn { position: absolute; top: 10px; right: 15px; background: none; border: none; color: var(--text-muted); font-size: 1.5em; cursor: pointer; width: auto; padding: 0; }
+    .profile-header { display: flex; gap: 15px; align-items: center; margin-bottom: 15px; }
+    .profile-header img { width: 60px; height: 60px; border-radius: 50%; object-fit: cover; }
+    .profile-title h2 { font-size: 1.2em; }
+    .status-badge { font-size: 0.8em; color: var(--online); }
+    .profile-body h3 { font-size: 0.9em; margin-bottom: 5px; color: var(--text-muted); }
+    .profile-body p { font-size: 0.95em; }
 
     .hidden { display: none !important; }
   </style>
@@ -64,8 +80,8 @@
   <!-- AUTHENTICATION FORM -->
   <div id="auth-container">
     <h2 id="auth-title">Login</h2>
-    <input type="text" id="username" placeholder="Username" />
-    <input type="password" id="password" placeholder="Password" />
+    <input type="text" id="auth-username" placeholder="Username" />
+    <input type="password" id="auth-password" placeholder="Password" />
     <button id="auth-btn" onclick="handleAuth()">Login</button>
     <div class="toggle-auth" onclick="toggleAuthMode()">Need an account? Sign Up</div>
   </div>
@@ -78,7 +94,7 @@
       </div>
       
       <div class="friend-box">
-        <input type="text" id="friend-input" placeholder="Add friend username..." />
+        <input type="text" id="friend-input" placeholder="Add friend..." />
         <button onclick="addFriend()">+</button>
       </div>
 
@@ -127,14 +143,12 @@
           <h3>Edit Profile</h3>
           <input type="text" id="edit-avatar-input" placeholder="Avatar Image URL">
           <input type="text" id="edit-status-input" placeholder="Status (e.g. Gaming, Chilling)">
-          <textarea id="edit-bio-input" placeholder="Tell everyone about yourself..." maxlength="150" rows="3"></textarea>
-          <button onclick="saveProfileChanges()" class="save-btn">Save Profile</button>
+          <textarea id="edit-bio-input" placeholder="Tell everyone about yourself..." maxlength="150" rows="3" style="width:100%; background:#2a2a2a; color:#fff; border:1px solid var(--border); padding:8px; border-radius:6px; margin-top:8px;"></textarea>
+          <button onclick="saveProfileChanges()">Save Profile</button>
         </div>
       </div>
     </div>
   </div>
-
-  <script src="/socket.io/socket.io.js"></script>
 
   <script>
     let socket;
@@ -144,7 +158,13 @@
     let isDM = false;
     let isLogin = true;
 
-    // --- AUTHENTICATION ---
+    function escapeHTML(str) {
+      if (!str) return '';
+      return str.replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+      }[tag] || tag));
+    }
+
     function toggleAuthMode() {
       isLogin = !isLogin;
       document.getElementById('auth-title').innerText = isLogin ? 'Login' : 'Sign Up';
@@ -153,8 +173,8 @@
     }
 
     async function handleAuth() {
-      const username = document.getElementById('username').value.trim();
-      const password = document.getElementById('password').value.trim();
+      const username = document.getElementById('auth-username').value.trim();
+      const password = document.getElementById('auth-password').value.trim();
 
       if (!username || !password) return alert('Fill in all fields');
 
@@ -168,11 +188,9 @@
         });
 
         const data = await res.json();
-        if (!res.ok) return alert(data.error);
+        if (!res.ok) return alert(data.error || 'Authentication failed');
 
-        currentUser = data.username;
-        
-        // Fetch user profile info on login
+        currentUser = data.username || username;
         await loadMyProfile();
 
         document.getElementById('auth-container').classList.add('hidden');
@@ -198,7 +216,6 @@
       }
     }
 
-    // --- SOCKET IO ---
     function initSocket() {
       socket = io();
 
@@ -221,7 +238,7 @@
       socket.on('update_friends', (friends) => {
         const list = document.getElementById('friends-list');
         list.innerHTML = '';
-        if (friends.length === 0) {
+        if (!friends || friends.length === 0) {
           list.innerHTML = `<li style="color: var(--text-muted); font-size: 0.85em;">No friends added yet</li>`;
           return;
         }
@@ -233,28 +250,22 @@
         });
       });
 
-      socket.on('friend_added', (friend) => {
-        alert(`You are now friends with ${friend}!`);
-      });
-
+      socket.on('friend_added', (friend) => alert(`You are now friends with ${friend}!`));
       socket.on('friend_error', (msg) => alert(msg));
 
-      socket.on('chat_history', ({ room, messages }) => {
+      socket.on('chat_history', ({ messages }) => {
         const box = document.getElementById('messages');
         box.innerHTML = '';
-        messages.forEach(appendMessage);
+        if (messages) messages.forEach(appendMessage);
       });
 
-      socket.on('receive_message', (msg) => {
-        appendMessage(msg);
-      });
+      socket.on('receive_message', (msg) => appendMessage(msg));
     }
 
-    // --- MESSAGING ---
     function addFriend() {
       const input = document.getElementById('friend-input');
       const target = input.value.trim();
-      if (!target) return;
+      if (!target || !socket) return;
       socket.emit('add_friend', target);
       input.value = '';
     }
@@ -263,7 +274,8 @@
       currentTarget = target;
       isDM = dmFlag;
       document.getElementById('chat-title').innerText = isDM ? `@${target}` : `# ${target}`;
-      
+      document.getElementById('messages').innerHTML = '';
+
       if (isDM) {
         socket.emit('get_dm_history', currentTarget);
       } else {
@@ -288,12 +300,10 @@
 
     function appendMessage(msg) {
       const box = document.getElementById('messages');
-      
-      // Determine if message belongs in current chat view
       if (isDM) {
         if (msg.target !== currentTarget && msg.sender !== currentTarget) return;
-      } else {
-        if (msg.isDM) return;
+      } else if (msg.isDM) {
+        return;
       }
 
       const msgElement = document.createElement('div');
@@ -316,7 +326,6 @@
       box.scrollTop = box.scrollHeight;
     }
 
-    // --- PROFILE MODAL FUNCTIONS ---
     async function openProfileModal(targetUsername) {
       const modal = document.getElementById('profile-modal');
       modal.classList.remove('hidden');
@@ -369,14 +378,6 @@
       } catch (err) {
         console.error('Error saving profile:', err);
       }
-    }
-
-    // --- SECURITY HELPER ---
-    function escapeHTML(str) {
-      if (!str) return '';
-      return str.replace(/[&<>'"]/g, 
-        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
-      );
     }
   </script>
 </body>
