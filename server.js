@@ -28,7 +28,7 @@ const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
   friends: [{ type: String }],
-  bio: { type: String, default: "Hey there! I am using ChatApp." },
+  bio: { type: String, default: "Default" },
   avatar: { type: String, default: "https://i.imgur.com/6VBx3io.png" },
   banner: { type: String, default: "" },
   status: { type: String, default: "Online" },
